@@ -48,9 +48,7 @@ export function updatePlayerFormation(
 }
 
 export function shootFromAll(
-  scene: THREE.Scene,
   playerMeshes: THREE.Mesh[],
-  playerY: number,
   shootBulletFrom: (x: number) => void,
 ) {
   for (let i = 0; i < playerMeshes.length; i++) {

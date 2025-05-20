@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createEnemyGroup } from "./enemy";
 import { getFormationPositions } from "./formation";
+import { shootFromAll } from "./player";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
@@ -265,13 +266,13 @@ export function initGame(container: HTMLElement): void {
     }
   };
 
-  function shootBulletFrom(x: number, y: number) {
-    const bulletGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-    const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0x3399ff });
+  function shootBulletFrom(x: number) {
+    const bulletGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    const bulletMaterial = new THREE.MeshBasicMaterial({ color: PLAYER_COLOR });
     const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-    bullet.position.set(x, y + 0.7, 0);
+    bullet.position.set(x, PLAYER_Y, 0);
     scene.add(bullet);
-    bullets.push({ mesh: bullet, lane: 0 });
+    bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
   }
 
   function animate(): void {
@@ -414,10 +415,7 @@ export function initGame(container: HTMLElement): void {
     }
     // Shooting logic
     if (now - lastShotTime > fireInterval) {
-      for (let i = 0; i < playerUnits; i++) {
-        const mesh = playerMeshes[i];
-        shootBulletFrom(mesh.position.x, mesh.position.y);
-      }
+      shootFromAll(playerMeshes, shootBulletFrom);
       lastShotTime = now;
     }
     // Victory check
