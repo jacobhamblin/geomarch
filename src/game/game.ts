@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createEnemyGroup } from "./enemy";
 import { getFormationPositions } from "./formation";
+import { createProceduralZombie } from "./zombie";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
@@ -157,8 +158,14 @@ export function initGame(container: HTMLElement): void {
   );
   camera.position.z = 15;
   camera.position.y = 0;
-  // PerspectiveCamera: field of view and aspect ratio will handle visible area
-  // Removed camera.left, camera.right, camera.updateProjectionMatrix (not valid for PerspectiveCamera)
+
+  // Add lighting
+  const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(-5, 10, 5); // Position light from top-left
+  scene.add(directionalLight);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
@@ -210,8 +217,17 @@ export function initGame(container: HTMLElement): void {
   }
 
   // Spawn powerups in right lane
+  let lastHitCount = 0; // Track the last powerup's hit count
   for (let i = 0; i < POWERUP_COUNT; i++) {
-    const hitCount = Math.floor(Math.random() * 5) + 2;
+    let hitCount;
+    if (i === 0) {
+      // First powerup is always 2 or 3 hits
+      hitCount = Math.floor(Math.random() * 2) + 2; // 2 or 3
+    } else {
+      // Add 1d6 to the previous powerup's hit count
+      hitCount = lastHitCount + Math.floor(Math.random() * 6) + 1;
+    }
+    lastHitCount = hitCount; // Store for next iteration
     const y = 6 + i * 4;
     const isFireRate = i % 2 === 0;
     const color = isFireRate ? POWERUP_COLOR : POWERUP_ALT_COLOR;
@@ -280,6 +296,16 @@ export function initGame(container: HTMLElement): void {
     const now = performance.now();
     const delta = (now - lastFrameTime) / 1000; // seconds
     lastFrameTime = now;
+
+    // Animate zombies
+    for (const group of enemyGroups) {
+      for (const mesh of group.meshes) {
+        if (mesh.userData.animate) {
+          mesh.userData.animate(now / 1000);
+        }
+      }
+    }
+
     // Player follows pointerX between lanes
     const minX = LANE_LEFT_X;
     const maxX = LANE_RIGHT_X;
@@ -351,64 +377,74 @@ export function initGame(container: HTMLElement): void {
         bullets.splice(i, 1);
         continue;
       }
-      // Check collision with enemies
+
+      // Check collision with enemies in the same lane
+      const bulletLane = b.mesh.position.x < 0 ? -1 : 1;
       for (let j = enemyGroups.length - 1; j >= 0; j--) {
         const group = enemyGroups[j];
-        if (
-          Math.abs(b.mesh.position.x - group.mesh.position.x) < 0.8 &&
-          Math.abs(b.mesh.position.y - group.mesh.position.y) < 1
-        ) {
-          group.size--;
-          // Remove one mesh from the group and from the scene
-          const removedMesh = group.meshes.pop();
-          if (removedMesh) scene.remove(removedMesh);
-          scene.remove(b.mesh);
-          bullets.splice(i, 1);
-          if (group.size <= 0) {
-            // Remove any remaining meshes (should be none)
-            for (const mesh of group.meshes) scene.remove(mesh);
-            enemyGroups.splice(j, 1);
-            enemyLabels.splice(j, 1);
+        // Check if enemy is in the same lane
+        const enemyLane = group.mesh.position.x < 0 ? -1 : 1;
+        if (bulletLane === enemyLane) {
+          // Check if bullet is within the vertical range of the enemy group
+          const verticalRange = 1.5; // How far above/below the enemy group center to check
+          if (
+            Math.abs(b.mesh.position.y - group.mesh.position.y) < verticalRange
+          ) {
+            group.size--;
+            // Remove one mesh from the group and from the scene
+            const removedMesh = group.meshes.pop();
+            if (removedMesh) scene.remove(removedMesh);
+            scene.remove(b.mesh);
+            bullets.splice(i, 1);
+            if (group.size <= 0) {
+              // Remove any remaining meshes
+              for (const mesh of group.meshes) scene.remove(mesh);
+              enemyGroups.splice(j, 1);
+              enemyLabels.splice(j, 1);
+            }
+            break;
           }
-          break;
         }
       }
-      // Check collision with powerups
+
+      // Check collision with powerups in the same lane
       for (let j = powerups.length - 1; j >= 0; j--) {
         const p = powerups[j];
-        if (
-          Math.abs(b.mesh.position.x - p.mesh.position.x) < 0.8 &&
-          Math.abs(b.mesh.position.y - p.mesh.position.y) < 1
-        ) {
-          p.hitCount--;
-          // Update the powerup label to show the new hitCount
-          if (powerupLabels[j] && powerupLabels[j].material.map) {
-            const newLabel = createTextSprite(
-              p.hitCount.toString(),
-              p.type === "fireRate" ? "#fff" : "#222",
-              48,
-            );
-            powerupLabels[j].material.map = new THREE.CanvasTexture(
-              newLabel.material.map!.image,
-            );
-          }
-          scene.remove(b.mesh);
-          bullets.splice(i, 1);
-          if (p.hitCount <= 0) {
-            scene.remove(p.mesh);
-            scene.remove(powerupLabels[j]);
-            // Apply powerup effect
-            if (p.type === "fireRate") {
-              fireInterval = Math.max(200, fireInterval / 2);
-            } else if (p.type === "units") {
-              playerUnits++;
-              updatePlayerUnitsDisplay();
-              updatePlayerMeshes(targetX);
+        const powerupLane = p.mesh.position.x < 0 ? -1 : 1;
+        if (bulletLane === powerupLane) {
+          // Check if bullet is within the vertical range of the powerup
+          const verticalRange = 1.5; // How far above/below the powerup to check
+          if (Math.abs(b.mesh.position.y - p.mesh.position.y) < verticalRange) {
+            p.hitCount--;
+            // Update the powerup label to show the new hitCount
+            if (powerupLabels[j] && powerupLabels[j].material.map) {
+              const newLabel = createTextSprite(
+                p.hitCount.toString(),
+                p.type === "fireRate" ? "#fff" : "#222",
+                48,
+              );
+              powerupLabels[j].material.map = new THREE.CanvasTexture(
+                newLabel.material.map!.image,
+              );
             }
-            powerups.splice(j, 1);
-            powerupLabels.splice(j, 1);
+            scene.remove(b.mesh);
+            bullets.splice(i, 1);
+            if (p.hitCount <= 0) {
+              scene.remove(p.mesh);
+              scene.remove(powerupLabels[j]);
+              // Apply powerup effect
+              if (p.type === "fireRate") {
+                fireInterval = Math.max(200, fireInterval / 2);
+              } else if (p.type === "units") {
+                playerUnits++;
+                updatePlayerUnitsDisplay();
+                updatePlayerMeshes(targetX);
+              }
+              powerups.splice(j, 1);
+              powerupLabels.splice(j, 1);
+            }
+            break;
           }
-          break;
         }
       }
     }
