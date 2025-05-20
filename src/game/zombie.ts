@@ -1,24 +1,11 @@
 import * as THREE from "three";
 
 export interface ZombieUserData {
-  arm1: THREE.Mesh;
-  arm2: THREE.Mesh;
-  head: THREE.Mesh;
-  animate: (time: number) => void;
   health: number;
-  isFat: boolean;
-  isCrawling: boolean;
+  isFat?: boolean;
+  isCrawling?: boolean;
+  animate?: (time: number) => void;
 }
-
-const sharedGeometries = {
-  headBox: new THREE.BoxGeometry(1, 1, 1),
-  headSphere: new THREE.SphereGeometry(0.6, 6, 6),
-  headSkull: new THREE.SphereGeometry(0.6, 8, 8),
-  torso: new THREE.BoxGeometry(1.2, 1.5, 0.6),
-  leg: new THREE.BoxGeometry(0.4, 1.2, 0.4),
-  arm: new THREE.BoxGeometry(0.3, 1.2, 0.3),
-  weapon: new THREE.BoxGeometry(0.2, 0.8, 0.2),
-};
 
 export function createProceduralZombie(): THREE.Group {
   const zombie = new THREE.Group();

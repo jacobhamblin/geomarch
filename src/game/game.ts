@@ -1,13 +1,13 @@
 import * as THREE from "three";
 import { createEnemyGroup } from "./enemy";
-import { getFormationPositions } from "./formation";
 import type { ZombieUserData } from "./zombie";
+import { createPlayerFormation, shootBulletFrom } from "./soldier";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
   camera: THREE.PerspectiveCamera,
   animationId: number;
-let playerMeshes: THREE.Mesh[] = [];
+let playerMeshes: THREE.Group[] = [];
 interface EnemyGroup {
   mesh: THREE.Mesh;
   size: number;
@@ -21,7 +21,7 @@ interface Powerup {
   type: "fireRate" | "units";
 }
 let enemyGroups: EnemyGroup[] = [],
-  enemyLabels: THREE.Sprite[] = [],
+  enemyLabels: (THREE.Sprite | null)[] = [],
   powerups: Powerup[] = [],
   powerupLabels: THREE.Sprite[] = [];
 let bullets: { mesh: THREE.Mesh; lane: number }[] = [];
@@ -100,7 +100,23 @@ function showOverlay(message: string) {
     overlay.style.flexDirection = "column";
     document.body.appendChild(overlay);
   }
-  overlay.innerHTML = `<div>${message}</div><button style='font-size:2rem;margin-top:2rem' onclick='window.location.reload()'>Return to Menu</button>`;
+
+  // Clean up game state
+  if (renderer) {
+    cancelAnimationFrame(animationId);
+    renderer.dispose();
+    renderer = undefined;
+  }
+
+  // Clear all game objects
+  enemyGroups = [];
+  enemyLabels = [];
+  powerups = [];
+  powerupLabels = [];
+  bullets = [];
+  playerMeshes = [];
+
+  overlay.innerHTML = `<div>${message}</div><button style='font-size:2rem;margin-top:2rem' onclick='document.getElementById("game-overlay").remove(); window.location.reload();'>Return to Menu</button>`;
 }
 
 function updatePlayerUnitsDisplay() {
@@ -112,21 +128,21 @@ function updatePlayerMeshes(centerX = 0) {
   if (playerMeshes.length > 0) {
     for (const mesh of playerMeshes) scene.remove(mesh);
   }
-  playerMeshes = [];
-  const boxSize = 0.6;
-  const spacing = 0.7;
-  const positions = getFormationPositions(playerUnits, spacing);
-  for (let i = 0; i < playerUnits; i++) {
-    const playerGeometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
-    const playerMaterial = new THREE.MeshBasicMaterial({ color: PLAYER_COLOR });
-    const mesh = new THREE.Mesh(playerGeometry, playerMaterial);
-    mesh.position.set(centerX + positions[i].x, PLAYER_Y + positions[i].y, 0);
-    playerMeshes.push(mesh);
-    scene.add(mesh);
-  }
+  playerMeshes = createPlayerFormation(scene, playerUnits, centerX, PLAYER_Y);
+}
+
+function createBullet(x: number, y: number) {
+  const bullet = shootBulletFrom(scene, x, y, PLAYER_COLOR);
+  bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
 }
 
 export function initGame(container: HTMLElement): void {
+  // Remove any existing game overlay
+  const existingOverlay = document.getElementById("game-overlay");
+  if (existingOverlay) {
+    existingOverlay.remove();
+  }
+
   // Clean up previous game if any
   if (renderer) {
     cancelAnimationFrame(animationId);
@@ -135,6 +151,8 @@ export function initGame(container: HTMLElement): void {
     window.onkeydown = null;
     window.ontouchstart = null;
   }
+
+  // Reset all game state
   enemyGroups = [];
   enemyLabels = [];
   powerups = [];
@@ -146,6 +164,7 @@ export function initGame(container: HTMLElement): void {
   gameOver = false;
   victory = false;
   fireInterval = FIRE_INTERVAL;
+  lastFrameTime = 0;
   updatePlayerUnitsDisplay();
 
   // Scene setup
@@ -213,7 +232,7 @@ export function initGame(container: HTMLElement): void {
       meshes: enemyMeshes,
     });
     // No label for enemy count
-    enemyLabels.push(null as any); // placeholder for compatibility
+    enemyLabels.push(null); // placeholder for compatibility
   }
 
   // Spawn powerups in right lane
@@ -281,15 +300,6 @@ export function initGame(container: HTMLElement): void {
     }
   };
 
-  function shootBulletFrom(x: number, y: number) {
-    const bulletGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-    const bulletMaterial = new THREE.MeshBasicMaterial({ color: PLAYER_COLOR });
-    const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-    bullet.position.set(x, y, 0);
-    scene.add(bullet);
-    bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
-  }
-
   function animate(): void {
     if (gameOver || victory) return;
     animationId = requestAnimationFrame(animate);
@@ -300,8 +310,9 @@ export function initGame(container: HTMLElement): void {
     // Animate zombies
     for (const group of enemyGroups) {
       for (const mesh of group.meshes) {
-        if (mesh.userData.animate) {
-          mesh.userData.animate(now / 1000);
+        const zombieData = mesh.userData as ZombieUserData;
+        if (zombieData.animate) {
+          zombieData.animate(now / 1000);
         }
       }
     }
@@ -475,7 +486,7 @@ export function initGame(container: HTMLElement): void {
     if (now - lastShotTime > fireInterval) {
       for (let i = 0; i < playerUnits; i++) {
         const mesh = playerMeshes[i];
-        shootBulletFrom(mesh.position.x, mesh.position.y);
+        createBullet(mesh.position.x, mesh.position.y);
       }
       lastShotTime = now;
     }

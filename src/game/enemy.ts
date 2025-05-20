@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createProceduralZombie } from "./zombie";
+import type { ZombieUserData } from "./zombie";
 
 export const ENEMY_COLOR = 0xff2222;
 
@@ -51,7 +52,7 @@ export function createEnemyGroup(
     const zombie = createProceduralZombie();
     zombie.position.set(x + pos.x, y + pos.y, 0);
     zombie.scale.set(0.4, 0.4, 0.4); // Make zombies 20% smaller
-    const health = (zombie.userData as any).health;
+    const health = (zombie.userData as ZombieUserData).health;
     zombies.push({ mesh: zombie as unknown as THREE.Mesh, health });
   }
 

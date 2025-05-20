@@ -5,7 +5,6 @@ function App() {
 
   useEffect(() => {
     if (gameStarted) {
-      // @ts-ignore
       import("./game/game.ts").then((mod) => {
         const container = document.getElementById("game-container");
         if (container) mod.initGame(container);
