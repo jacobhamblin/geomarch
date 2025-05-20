@@ -1,11 +1,24 @@
 import * as THREE from "three";
 
-interface ZombieUserData {
+export interface ZombieUserData {
   arm1: THREE.Mesh;
   arm2: THREE.Mesh;
   head: THREE.Mesh;
   animate: (time: number) => void;
+  health: number;
+  isFat: boolean;
+  isCrawling: boolean;
 }
+
+const sharedGeometries = {
+  headBox: new THREE.BoxGeometry(1, 1, 1),
+  headSphere: new THREE.SphereGeometry(0.6, 6, 6),
+  headSkull: new THREE.SphereGeometry(0.6, 8, 8),
+  torso: new THREE.BoxGeometry(1.2, 1.5, 0.6),
+  leg: new THREE.BoxGeometry(0.4, 1.2, 0.4),
+  arm: new THREE.BoxGeometry(0.3, 1.2, 0.3),
+  weapon: new THREE.BoxGeometry(0.2, 0.8, 0.2),
+};
 
 export function createProceduralZombie(): THREE.Group {
   const zombie = new THREE.Group();
@@ -62,9 +75,23 @@ export function createProceduralZombie(): THREE.Group {
   const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor });
   const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor });
 
+  // === Special zombie types ===
+  const isFat = Math.random() < 0.15; // 15% chance of being a fat zombie
+  const isCrawling = Math.random() < 0.2; // 20% chance of being a crawling zombie
+  const isBaby = !isFat && !isCrawling && Math.random() < 0.2; // 20% chance of being a baby zombie (if not fat or crawling)
+
+  // Set health based on zombie type
+  const health = isFat ? 5 : isCrawling ? 3 : 1;
+
   // === Size variation ===
-  const isBaby = Math.random() < 0.2; // 20% chance of being a baby zombie
-  const scale = isBaby ? 0.6 : 1.0;
+  let scale = 1.0;
+  if (isFat) {
+    scale = 1.3; // Fat zombies are 30% larger
+  } else if (isBaby) {
+    scale = 0.6; // Baby zombies are 60% size
+  } else if (isCrawling) {
+    scale = 0.8; // Crawling zombies are 80% size
+  }
   zombie.scale.set(scale, scale, scale);
 
   // === Head ===
@@ -88,20 +115,32 @@ export function createProceduralZombie(): THREE.Group {
     zombie.add(eyeHoles2);
   }
   const head = new THREE.Mesh(headGeo, skinMat);
-  head.position.y = 2.75;
+  head.position.y = isCrawling ? 1.5 : 2.75; // Lower head position for crawling zombies
   zombie.add(head);
 
   // === Torso ===
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.5, 0.6), shirtMat);
-  torso.position.y = 1.5;
+  const torsoScale = isFat ? 1.5 : 1.0; // Wider torso for fat zombies
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2 * torsoScale, 1.5, 0.6 * torsoScale),
+    shirtMat,
+  );
+  torso.position.y = isCrawling ? 1.0 : 1.5; // Lower torso for crawling zombies
   zombie.add(torso);
 
   // === Legs ===
   const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
   const leg1 = new THREE.Mesh(legGeo, pantsMat);
   const leg2 = new THREE.Mesh(legGeo, pantsMat);
-  leg1.position.set(-0.3, 0.6, 0);
-  leg2.position.set(0.3, 0.6, 0);
+  if (isCrawling) {
+    // Position legs to the side for crawling zombies
+    leg1.position.set(-0.6, 0.6, 0);
+    leg2.position.set(0.6, 0.6, 0);
+    leg1.rotation.z = Math.PI / 4;
+    leg2.rotation.z = -Math.PI / 4;
+  } else {
+    leg1.position.set(-0.3, 0.6, 0);
+    leg2.position.set(0.3, 0.6, 0);
+  }
   zombie.add(leg1);
   zombie.add(leg2);
 
@@ -109,8 +148,16 @@ export function createProceduralZombie(): THREE.Group {
   const armGeo = new THREE.BoxGeometry(0.3, 1.2, 0.3);
   const arm1 = new THREE.Mesh(armGeo, skinMat);
   const arm2 = new THREE.Mesh(armGeo, skinMat);
-  arm1.position.set(-0.9, 2.1, 0);
-  arm2.position.set(0.9, 2.1, 0);
+  if (isCrawling) {
+    // Position arms forward for crawling zombies
+    arm1.position.set(-0.6, 1.0, 0.3);
+    arm2.position.set(0.6, 1.0, 0.3);
+    arm1.rotation.x = Math.PI / 4;
+    arm2.rotation.x = Math.PI / 4;
+  } else {
+    arm1.position.set(-0.9, 2.1, 0);
+    arm2.position.set(0.9, 2.1, 0);
+  }
   zombie.add(arm1);
   zombie.add(arm2);
 
@@ -134,16 +181,39 @@ export function createProceduralZombie(): THREE.Group {
     arm1,
     arm2,
     head,
+    health,
+    isFat,
+    isCrawling,
     animate: (time: number) => {
       const sway = Math.sin((time + timeOffset) * animationSpeed * 2) * 0.1;
       zombie.rotation.y = sway;
-      arm1.rotation.z =
-        Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
-      arm2.rotation.z =
-        -Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+
+      if (isCrawling) {
+        // Crawling animation
+        arm1.rotation.x =
+          Math.PI / 4 +
+          Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+        arm2.rotation.x =
+          Math.PI / 4 -
+          Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+        leg1.rotation.z =
+          Math.PI / 4 +
+          Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+        leg2.rotation.z =
+          -Math.PI / 4 -
+          Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+      } else {
+        // Normal walking animation
+        arm1.rotation.z =
+          Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+        arm2.rotation.z =
+          -Math.sin((time + timeOffset) * animationSpeed * 4) * 0.2;
+      }
+
       // Add some head bobbing
       head.position.y =
-        2.75 + Math.sin((time + timeOffset) * animationSpeed * 3) * 0.1;
+        (isCrawling ? 1.5 : 2.75) +
+        Math.sin((time + timeOffset) * animationSpeed * 3) * 0.1;
     },
   } as ZombieUserData;
 

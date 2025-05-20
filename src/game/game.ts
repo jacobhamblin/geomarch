@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { createEnemyGroup } from "./enemy";
 import { getFormationPositions } from "./formation";
-import { createProceduralZombie } from "./zombie";
+import type { ZombieUserData } from "./zombie";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
@@ -336,7 +336,8 @@ export function initGame(container: HTMLElement): void {
       group.y = group.mesh.position.y;
       // Enemy reaches player
       if (group.mesh.position.y <= PLAYER_Y + 0.5) {
-        playerUnits -= group.size;
+        // Use actual number of remaining zombies for damage
+        playerUnits -= group.meshes.length;
         updatePlayerUnitsDisplay();
         // Remove all meshes in the group
         for (const mesh of group.meshes) scene.remove(mesh);
@@ -348,6 +349,7 @@ export function initGame(container: HTMLElement): void {
           return;
         }
       } else if (group.mesh.position.y < PLAYER_Y - 2) {
+        // Remove any zombies that go past the player
         for (const mesh of group.meshes) scene.remove(mesh);
         enemyGroups.splice(i, 1);
         enemyLabels.splice(i, 1);
@@ -369,41 +371,60 @@ export function initGame(container: HTMLElement): void {
     }
     // Bullet movement and collision
     for (let i = bullets.length - 1; i >= 0; i--) {
-      const b = bullets[i];
+      const bullet = bullets[i];
+
       // Move bullet upward
-      b.mesh.position.y += BULLET_SPEED * delta * 60;
-      if (b.mesh.position.y > 30) {
-        scene.remove(b.mesh);
+      bullet.mesh.position.y += BULLET_SPEED * delta * 60;
+      if (bullet.mesh.position.y > 30) {
+        scene.remove(bullet.mesh);
         bullets.splice(i, 1);
         continue;
       }
 
-      // Check collision with enemies in the same lane
-      const bulletLane = b.mesh.position.x < 0 ? -1 : 1;
+      // Determine which lane the bullet is in
+      const bulletLane = bullet.mesh.position.x < 0 ? -1 : 1;
+
+      // Check for collisions with enemies in the same lane
       for (let j = enemyGroups.length - 1; j >= 0; j--) {
         const group = enemyGroups[j];
-        // Check if enemy is in the same lane
         const enemyLane = group.mesh.position.x < 0 ? -1 : 1;
+
         if (bulletLane === enemyLane) {
-          // Check if bullet is within the vertical range of the enemy group
-          const verticalRange = 1.5; // How far above/below the enemy group center to check
-          if (
-            Math.abs(b.mesh.position.y - group.mesh.position.y) < verticalRange
-          ) {
-            group.size--;
-            // Remove one mesh from the group and from the scene
-            const removedMesh = group.meshes.pop();
-            if (removedMesh) scene.remove(removedMesh);
-            scene.remove(b.mesh);
-            bullets.splice(i, 1);
-            if (group.size <= 0) {
-              // Remove any remaining meshes
-              for (const mesh of group.meshes) scene.remove(mesh);
-              enemyGroups.splice(j, 1);
-              enemyLabels.splice(j, 1);
+          // Check each zombie in the group for collision
+          for (let k = 0; k < group.meshes.length; k++) {
+            const zombie = group.meshes[k];
+            const zombieData = zombie.userData as ZombieUserData;
+            // Adjust collision range based on zombie type
+            const collisionRange = zombieData.isFat ? 2.5 : 1.5; // Fat zombies have larger collision range
+
+            if (
+              Math.abs(bullet.mesh.position.y - zombie.position.y) <
+              collisionRange
+            ) {
+              // Reduce health of this zombie
+              zombieData.health--;
+
+              // Remove bullet
+              scene.remove(bullet.mesh);
+              bullets.splice(i, 1);
+
+              // Remove the zombie if its health reaches 0
+              if (zombieData.health <= 0) {
+                scene.remove(zombie);
+                group.meshes = group.meshes.filter((mesh) => mesh !== zombie);
+                group.size = group.meshes.length; // Update group size to match remaining meshes
+
+                // Remove the group if all zombies are gone
+                if (group.meshes.length === 0) {
+                  enemyGroups.splice(j, 1);
+                  enemyLabels.splice(j, 1);
+                }
+              }
+
+              break; // Bullet can only hit one zombie
             }
-            break;
           }
+          if (i >= bullets.length) break; // Exit if bullet was removed
         }
       }
 
@@ -414,7 +435,9 @@ export function initGame(container: HTMLElement): void {
         if (bulletLane === powerupLane) {
           // Check if bullet is within the vertical range of the powerup
           const verticalRange = 1.5; // How far above/below the powerup to check
-          if (Math.abs(b.mesh.position.y - p.mesh.position.y) < verticalRange) {
+          if (
+            Math.abs(bullet.mesh.position.y - p.mesh.position.y) < verticalRange
+          ) {
             p.hitCount--;
             // Update the powerup label to show the new hitCount
             if (powerupLabels[j] && powerupLabels[j].material.map) {
@@ -427,7 +450,7 @@ export function initGame(container: HTMLElement): void {
                 newLabel.material.map!.image,
               );
             }
-            scene.remove(b.mesh);
+            scene.remove(bullet.mesh);
             bullets.splice(i, 1);
             if (p.hitCount <= 0) {
               scene.remove(p.mesh);
