@@ -1,35 +1,79 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState, useEffect } from "react";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [gameStarted, setGameStarted] = useState(false);
+
+  useEffect(() => {
+    if (gameStarted) {
+      // @ts-ignore
+      import("../public/game.ts").then((mod) => {
+        const container = document.getElementById("game-container");
+        if (container) mod.initGame(container);
+      });
+    }
+    // Set background to black
+    document.body.style.background = "black";
+  }, [gameStarted]);
+
+  // Max width: 600px, width: 100vw
+  const maxWidth = 600;
 
   return (
     <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+      <style>{`
+        #game-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          width: 100vw;
+          height: 100vh;
+        }
+        .game-canvas-wrapper {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          width: 100vw;
+          height: 100vh;
+        }
+        .game-canvas-inner {
+          max-width: ${maxWidth}px;
+          width: 100vw;
+          height: 100vh;
+          margin: 0 auto;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        .start-btn-wrapper {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          width: 100vw;
+          height: 100vh;
+        }
+        body, html {
+          background: black !important;
+        }
+      `}</style>
+      {!gameStarted && (
+        <div className="start-btn-wrapper">
+          <button
+            onClick={() => setGameStarted(true)}
+            style={{ fontSize: "2rem", margin: "2rem" }}
+          >
+            Start Game
+          </button>
+        </div>
+      )}
+      {gameStarted && (
+        <div className="game-canvas-wrapper">
+          <div className="game-canvas-inner">
+            <div id="game-container"></div>
+          </div>
+        </div>
+      )}
     </>
-  )
+  );
 }
 
-export default App
+export default App;
