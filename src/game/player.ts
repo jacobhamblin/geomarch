@@ -1,14 +1,13 @@
 import * as THREE from "three";
 import { PLAYER_COLOR } from "./game";
 import { getFormationPositions } from "./formation";
-import type { Vector2 } from "./formation";
 
 export let playerMeshes: THREE.Mesh[] = [];
 
 export function createPlayerMeshes(
   scene: THREE.Scene,
   playerUnits: number,
-  PLAYER_Y: number,
+  playerY: number,
 ): void {
   // Remove old meshes
   if (playerMeshes.length > 0) {
@@ -22,7 +21,7 @@ export function createPlayerMeshes(
     const playerGeometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
     const playerMaterial = new THREE.MeshBasicMaterial({ color: PLAYER_COLOR });
     const mesh = new THREE.Mesh(playerGeometry, playerMaterial);
-    mesh.position.set(positions[i].x, PLAYER_Y + positions[i].y, 0);
+    mesh.position.set(positions[i].x, playerY + positions[i].y, 0);
     playerMeshes.push(mesh);
     scene.add(mesh);
   }
@@ -51,7 +50,7 @@ export function updatePlayerFormation(
 export function shootFromAll(
   scene: THREE.Scene,
   playerMeshes: THREE.Mesh[],
-  PLAYER_Y: number,
+  playerY: number,
   shootBulletFrom: (x: number) => void,
 ) {
   for (let i = 0; i < playerMeshes.length; i++) {
