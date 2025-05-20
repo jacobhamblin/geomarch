@@ -49,10 +49,10 @@ export function updatePlayerFormation(
 
 export function shootFromAll(
   playerMeshes: THREE.Mesh[],
-  shootBulletFrom: (x: number) => void,
+  shootBulletFrom: (x: number, y: number) => void,
 ) {
   for (let i = 0; i < playerMeshes.length; i++) {
     const mesh = playerMeshes[i];
-    shootBulletFrom(mesh.position.x);
+    shootBulletFrom(mesh.position.x, mesh.position.y);
   }
 }
