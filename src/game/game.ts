@@ -42,8 +42,6 @@ export const PLAYER_COLOR = 0x0077ff;
 const ENEMY_LANE_COLOR = 0xff5555;
 const POWERUP_LANE_COLOR = 0x55ff55;
 const PLAYER_MOVE_SPEED = 0.2;
-const ENEMY_COUNT = 10;
-const POWERUP_COUNT = 10;
 const ENEMY_SPEED = 0.02;
 const POWERUP_SPEED = 0.02;
 const POWERUP_COLOR = 0x22ff22;
@@ -54,6 +52,14 @@ let gameOver = false;
 let victory = false;
 let fireInterval = FIRE_INTERVAL;
 let lastFrameTime = 0;
+let lastEnemySpawnTime = 0;
+let lastPowerupSpawnTime = 0;
+const ENEMY_SPAWN_INTERVAL = 5000; // 5 seconds between enemy spawns
+const POWERUP_SPAWN_INTERVAL = 8000; // 8 seconds between powerup spawns
+const ENEMY_SPAWN_Y = 12; // Spawn enemies 12 units above player
+const POWERUP_SPAWN_Y = 12; // Spawn powerups 12 units above player
+const REQUIRED_WAVES = 10; // Number of enemy waves needed for victory
+let wavesSpawned = 0; // Counter for number of enemy waves spawned
 
 function createTextSprite(
   message: string,
@@ -136,6 +142,72 @@ function createBullet(x: number, y: number) {
   bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
 }
 
+function calculateEnemyGroupSize(): number {
+  // Base size on player's current power level
+  const playerPower = playerUnits * (FIRE_INTERVAL / fireInterval);
+  // Start with a base size of 3-5 enemies
+  let baseSize = Math.floor(Math.random() * 3) + 3;
+  // Scale up based on player power, but cap at 15 enemies
+  const scaledSize = Math.min(
+    15,
+    Math.floor(baseSize * (1 + playerPower / 10)),
+  );
+  return scaledSize;
+}
+
+function calculatePowerupHitCount(): number {
+  // Base hit count on player's current power level
+  const playerPower = playerUnits * (FIRE_INTERVAL / fireInterval);
+  // Start with a base hit count of 2-4
+  let baseHitCount = Math.floor(Math.random() * 3) + 2;
+  // Scale up based on player power, but cap at 10 hits
+  return Math.min(10, Math.floor(baseHitCount * (1 + playerPower / 10)));
+}
+
+function spawnEnemyGroup() {
+  const enemySize = calculateEnemyGroupSize();
+  const enemyMeshes = createEnemyGroup(
+    scene,
+    LANE_LEFT_X,
+    ENEMY_SPAWN_Y,
+    enemySize,
+  );
+  enemyGroups.push({
+    mesh: enemyMeshes[0],
+    size: enemySize,
+    y: ENEMY_SPAWN_Y,
+    meshes: enemyMeshes,
+  });
+  enemyLabels.push(null);
+  wavesSpawned++; // Increment wave counter
+}
+
+function spawnPowerup() {
+  const hitCount = calculatePowerupHitCount();
+  const isFireRate = Math.random() < 0.5;
+  const color = isFireRate ? POWERUP_COLOR : POWERUP_ALT_COLOR;
+  const powerupGeometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+  const powerupMaterial = new THREE.MeshBasicMaterial({ color });
+  const powerup = new THREE.Mesh(powerupGeometry, powerupMaterial);
+  powerup.position.set(LANE_RIGHT_X, POWERUP_SPAWN_Y, 0);
+  scene.add(powerup);
+  powerups.push({
+    mesh: powerup,
+    hitCount,
+    y: POWERUP_SPAWN_Y,
+    type: isFireRate ? "fireRate" : "units",
+  });
+  // Add label
+  const label = createTextSprite(
+    hitCount.toString(),
+    isFireRate ? "#fff" : "#222",
+    48,
+  );
+  label.position.set(LANE_RIGHT_X, POWERUP_SPAWN_Y + 1, 2);
+  scene.add(label);
+  powerupLabels.push(label);
+}
+
 export function initGame(container: HTMLElement): void {
   // Remove any existing game overlay
   const existingOverlay = document.getElementById("game-overlay");
@@ -165,6 +237,9 @@ export function initGame(container: HTMLElement): void {
   victory = false;
   fireInterval = FIRE_INTERVAL;
   lastFrameTime = 0;
+  lastEnemySpawnTime = 0;
+  lastPowerupSpawnTime = 0;
+  wavesSpawned = 0; // Reset wave counter
   updatePlayerUnitsDisplay();
 
   // Scene setup
@@ -214,63 +289,9 @@ export function initGame(container: HTMLElement): void {
   // Player unit (simple box)
   updatePlayerMeshes();
 
-  // Spawn enemy groups in left lane
-  for (let i = 0; i < ENEMY_COUNT; i++) {
-    let enemySize;
-    if (i < 2) {
-      // First two waves: 3 to 7 enemies
-      enemySize = Math.floor(Math.random() * 5) + 3; // 3, 4, 5, 6, 7
-    } else {
-      enemySize = Math.floor(Math.random() * 10) + 5;
-    }
-    const y = 4 + i * 4.5;
-    const enemyMeshes = createEnemyGroup(scene, LANE_LEFT_X, y, enemySize);
-    enemyGroups.push({
-      mesh: enemyMeshes[0],
-      size: enemySize,
-      y,
-      meshes: enemyMeshes,
-    });
-    // No label for enemy count
-    enemyLabels.push(null); // placeholder for compatibility
-  }
-
-  // Spawn powerups in right lane
-  let lastHitCount = 0; // Track the last powerup's hit count
-  for (let i = 0; i < POWERUP_COUNT; i++) {
-    let hitCount;
-    if (i === 0) {
-      // First powerup is always 2 or 3 hits
-      hitCount = Math.floor(Math.random() * 2) + 2; // 2 or 3
-    } else {
-      // Add 1d6 to the previous powerup's hit count
-      hitCount = lastHitCount + Math.floor(Math.random() * 6) + 1;
-    }
-    lastHitCount = hitCount; // Store for next iteration
-    const y = 6 + i * 4;
-    const isFireRate = i % 2 === 0;
-    const color = isFireRate ? POWERUP_COLOR : POWERUP_ALT_COLOR;
-    const powerupGeometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-    const powerupMaterial = new THREE.MeshBasicMaterial({ color });
-    const powerup = new THREE.Mesh(powerupGeometry, powerupMaterial);
-    powerup.position.set(LANE_RIGHT_X, y, 0);
-    scene.add(powerup);
-    powerups.push({
-      mesh: powerup,
-      hitCount,
-      y,
-      type: isFireRate ? "fireRate" : "units",
-    });
-    // Add label
-    const label = createTextSprite(
-      hitCount.toString(),
-      isFireRate ? "#fff" : "#222",
-      48,
-    );
-    label.position.set(LANE_RIGHT_X, y + 1, 2);
-    scene.add(label);
-    powerupLabels.push(label);
-  }
+  // Spawn initial wave of enemies
+  spawnEnemyGroup();
+  lastEnemySpawnTime = performance.now();
 
   // Mouse/touch controls for player movement
   function updatePointerFromEvent(x: number) {
@@ -306,6 +327,16 @@ export function initGame(container: HTMLElement): void {
     const now = performance.now();
     const delta = (now - lastFrameTime) / 1000; // seconds
     lastFrameTime = now;
+
+    // Spawn new enemies and powerups based on timing
+    if (now - lastEnemySpawnTime > ENEMY_SPAWN_INTERVAL) {
+      spawnEnemyGroup();
+      lastEnemySpawnTime = now;
+    }
+    if (now - lastPowerupSpawnTime > POWERUP_SPAWN_INTERVAL) {
+      spawnPowerup();
+      lastPowerupSpawnTime = now;
+    }
 
     // Animate zombies
     for (const group of enemyGroups) {
@@ -491,7 +522,11 @@ export function initGame(container: HTMLElement): void {
       lastShotTime = now;
     }
     // Victory check
-    if (!victory && enemyGroups.length === 0) {
+    if (
+      !victory &&
+      enemyGroups.length === 0 &&
+      wavesSpawned >= REQUIRED_WAVES
+    ) {
       victory = true;
       showOverlay("Victory!");
       return;
