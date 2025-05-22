@@ -20,6 +20,12 @@ interface Powerup {
   y: number;
   type: "fireRate" | "units";
 }
+interface State {
+  playerUnits: number;
+  enemyUnits: number;
+  enemyUnitBullets: number;
+  fireInterval: number;
+}
 let enemyGroups: EnemyGroup[] = [],
   enemyLabels: (THREE.Sprite | null)[] = [],
   powerups: Powerup[] = [],
@@ -27,7 +33,13 @@ let enemyGroups: EnemyGroup[] = [],
 let bullets: { mesh: THREE.Mesh; lane: number }[] = [];
 let lastShotTime = 0;
 const BULLET_SPEED = 0.2;
-const FIRE_INTERVAL = 1000; // ms
+const FIRE_INTERVAL = 2000; // ms
+let state: State = {
+  playerUnits: 1,
+  enemyUnits: 0,
+  enemyUnitBullets: 0,
+  fireInterval: FIRE_INTERVAL,
+};
 
 // Game constants
 const PLAYER_Y = -8;
@@ -47,10 +59,8 @@ const POWERUP_SPEED = 0.02;
 const POWERUP_COLOR = 0x22ff22;
 const POWERUP_ALT_COLOR = 0xffff22;
 let pointerX = 0; // -1 (left) to 1 (right)
-let playerUnits = 1;
 let gameOver = false;
 let victory = false;
-let fireInterval = FIRE_INTERVAL;
 let lastFrameTime = 0;
 let lastEnemySpawnTime = 0;
 let lastPowerupSpawnTime = 0;
@@ -59,6 +69,7 @@ const POWERUP_SPAWN_INTERVAL = 8000; // 8 seconds between powerup spawns
 const ENEMY_SPAWN_Y = 12; // Spawn enemies 12 units above player
 const POWERUP_SPAWN_Y = 12; // Spawn powerups 12 units above player
 const REQUIRED_WAVES = 10; // Number of enemy waves needed for victory
+const TRAVEL_TIME = 11000; // Seconds for enemies/powerups to reach player
 let wavesSpawned = 0; // Counter for number of enemy waves spawned
 
 function createTextSprite(
@@ -134,7 +145,12 @@ function updatePlayerMeshes(centerX = 0) {
   if (playerMeshes.length > 0) {
     for (const mesh of playerMeshes) scene.remove(mesh);
   }
-  playerMeshes = createPlayerFormation(scene, playerUnits, centerX, PLAYER_Y);
+  playerMeshes = createPlayerFormation(
+    scene,
+    state.playerUnits,
+    centerX,
+    PLAYER_Y,
+  );
 }
 
 function createBullet(x: number, y: number) {
@@ -142,36 +158,50 @@ function createBullet(x: number, y: number) {
   bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
 }
 
+function calculatePlayerBulletsPerSecond(): number {
+  return (1000 / state.fireInterval) * state.playerUnits;
+}
+
 function calculateEnemyGroupSize(): number {
-  // Base size on player's current power level
-  const playerPower = playerUnits * (FIRE_INTERVAL / fireInterval);
-  // Start with a base size of 3-5 enemies
-  let baseSize = Math.floor(Math.random() * 3) + 3;
-  // Scale up based on player power, but cap at 15 enemies
-  const scaledSize = Math.min(
-    15,
-    Math.floor(baseSize * (1 + playerPower / 10)),
-  );
-  return scaledSize;
+  const bulletsPerSecond = calculatePlayerBulletsPerSecond();
+  // Calculate how many bullets the player can fire during the travel time
+  // const totalBullets = bulletsPerSecond * (TRAVEL_TIME / 1000);
+  const totalBullets = bulletsPerSecond * (ENEMY_SPAWN_INTERVAL / 1000);
+
+  // Base size on total bullets, assuming each zombie takes 2-3 hits
+  // const hitsPerZombie = 2 + Math.random(); // Random between 2 and 3
+  // const maxZombies = Math.floor(totalBullets / hitsPerZombie);
+
+  // Ensure we have at least 3 zombies and cap at 15
+  // const groupSize = Math.min(15, Math.max(3, maxZombies));
+  // const groupSize = maxZombies;
+  // return Math.floor(totalBullets);
+  const spareBullets = totalBullets - state.enemyUnitBullets;
+  return Math.floor(spareBullets * 0.8);
 }
 
 function calculatePowerupHitCount(): number {
-  // Base hit count on player's current power level
-  const playerPower = playerUnits * (FIRE_INTERVAL / fireInterval);
-  // Start with a base hit count of 2-4
-  let baseHitCount = Math.floor(Math.random() * 3) + 2;
-  // Scale up based on player power, but cap at 10 hits
-  return Math.min(10, Math.floor(baseHitCount * (1 + playerPower / 10)));
+  const bulletsPerSecond = calculatePlayerBulletsPerSecond();
+  // Calculate how many bullets the player can fire during the travel time
+  const totalBullets = bulletsPerSecond * (TRAVEL_TIME / 1000);
+
+  // Make powerups require about 40% of the player's total bullets
+  const hitCount = Math.ceil(totalBullets * 0.4);
+
+  // Ensure hit count is at least 2 and cap at 15
+  return Math.min(15, Math.max(2, hitCount));
 }
 
 function spawnEnemyGroup() {
   const enemySize = calculateEnemyGroupSize();
+  state.enemyUnitBullets += enemySize;
   const enemyMeshes = createEnemyGroup(
     scene,
     LANE_LEFT_X,
     ENEMY_SPAWN_Y,
     enemySize,
   );
+  state.enemyUnits += enemyMeshes.length;
   enemyGroups.push({
     mesh: enemyMeshes[0],
     size: enemySize,
@@ -232,10 +262,14 @@ export function initGame(container: HTMLElement): void {
   bullets = [];
   lastShotTime = 0;
   pointerX = 0;
-  playerUnits = 1;
+  state = {
+    playerUnits: 1,
+    enemyUnits: 0,
+    enemyUnitBullets: 0,
+    fireInterval: FIRE_INTERVAL,
+  };
   gameOver = false;
   victory = false;
-  fireInterval = FIRE_INTERVAL;
   lastFrameTime = 0;
   lastEnemySpawnTime = 0;
   lastPowerupSpawnTime = 0;
@@ -376,16 +410,25 @@ export function initGame(container: HTMLElement): void {
         mesh.position.y -= ENEMY_SPEED * delta * 60;
       }
       group.y = group.mesh.position.y;
-      // Enemy reaches player
-      if (group.mesh.position.y <= PLAYER_Y + 0.5) {
+
+      // Check if any zombie in the group has reached the player
+      let anyZombieReached = false;
+      for (const mesh of group.meshes) {
+        if (mesh.position.y <= PLAYER_Y + 0.5) {
+          anyZombieReached = true;
+          break;
+        }
+      }
+
+      if (anyZombieReached) {
         // Use actual number of remaining zombies for damage
-        playerUnits -= group.meshes.length;
+        state.playerUnits -= group.meshes.length;
         updatePlayerUnitsDisplay();
         // Remove all meshes in the group
         for (const mesh of group.meshes) scene.remove(mesh);
         enemyGroups.splice(i, 1);
         enemyLabels.splice(i, 1);
-        if (playerUnits <= 0) {
+        if (state.playerUnits <= 0) {
           gameOver = true;
           showOverlay("Game Over!");
           return;
@@ -449,12 +492,14 @@ export function initGame(container: HTMLElement): void {
               // Remove bullet
               scene.remove(bullet.mesh);
               bullets.splice(i, 1);
+              state.enemyUnitBullets--;
 
               // Remove the zombie if its health reaches 0
               if (zombieData.health <= 0) {
                 scene.remove(zombie);
                 group.meshes = group.meshes.filter((mesh) => mesh !== zombie);
                 group.size = group.meshes.length; // Update group size to match remaining meshes
+                state.enemyUnits--;
 
                 // Remove the group if all zombies are gone
                 if (group.meshes.length === 0) {
@@ -499,9 +544,9 @@ export function initGame(container: HTMLElement): void {
               scene.remove(powerupLabels[j]);
               // Apply powerup effect
               if (p.type === "fireRate") {
-                fireInterval = Math.max(200, fireInterval / 2);
+                state.fireInterval = Math.max(200, state.fireInterval / 2);
               } else if (p.type === "units") {
-                playerUnits++;
+                state.playerUnits++;
                 updatePlayerUnitsDisplay();
                 updatePlayerMeshes(targetX);
               }
@@ -514,8 +559,8 @@ export function initGame(container: HTMLElement): void {
       }
     }
     // Shooting logic
-    if (now - lastShotTime > fireInterval) {
-      for (let i = 0; i < playerUnits; i++) {
+    if (now - lastShotTime > state.fireInterval) {
+      for (let i = 0; i < state.playerUnits; i++) {
         const mesh = playerMeshes[i];
         createBullet(mesh.position.x, mesh.position.y);
       }
