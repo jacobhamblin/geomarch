@@ -80,6 +80,7 @@ export function createProceduralZombie(): THREE.Group {
     scale = 0.8; // Crawling zombies are 80% size
   }
   zombie.scale.set(scale, scale, scale);
+  zombie.rotation.x += 45;
 
   // === Head ===
   const headType = Math.random();

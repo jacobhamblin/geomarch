@@ -69,6 +69,7 @@ export function createProceduralSoldier(): THREE.Group {
   // === Scale variation ===
   const scale = 0.9 + Math.random() * 0.2; // 0.9x to 1.1x
   soldier.scale.set(scale, scale, scale);
+  soldier.rotation.x += 120;
 
   return soldier;
 }

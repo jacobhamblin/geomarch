@@ -15,18 +15,18 @@ export class DesertEnvironment implements EnvironmentImpl {
 
   // Environment-specific properties
   private readonly numObjects = 3;
-  private readonly ambientColorPairs = [
-    ["#E6BE8A", "#D2B48C"],
-    ["#8B4513", "#A0522D"],
-  ];
-  private readonly skyColorPairs = [
-    ["#87CEEB", "#B0E0E6"],
-    ["#F0F8FF", "#F0F8FF"],
-  ];
-  private readonly lightColorPairs = [
-    ["#FF7F50", "#FFA07A"],
-    ["#FA8072", "#E9967A"],
-  ];
+  // private readonly ambientColorPairs = [
+  //   ["#E6BE8A", "#D2B48C"],
+  //   ["#8B4513", "#A0522D"],
+  // ];
+  // private readonly skyColorPairs = [
+  //   ["#87CEEB", "#B0E0E6"],
+  //   ["#F0F8FF", "#F0F8FF"],
+  // ];
+  // private readonly lightColorPairs = [
+  //   ["#FF7F50", "#FFA07A"],
+  //   ["#FA8072", "#E9967A"],
+  // ];
 
   // Game constants
   private readonly laneLeftX: number;
@@ -97,7 +97,7 @@ export class DesertEnvironment implements EnvironmentImpl {
     this.envProps.push({ mesh, y, z, side, nextRespawn: 0 });
   }
 
-  update(delta: number, now: number): void {
+  update(delta: number, _now: number): void {
     if (!this.scene) return;
 
     // Move props down

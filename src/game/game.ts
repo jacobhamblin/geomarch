@@ -4,7 +4,8 @@ import type { ZombieUserData } from "./zombie";
 import { createPlayerFormation, shootBulletFrom } from "./soldier";
 import { throttleLog } from "../utils";
 import { createProceduralZombie } from "./zombie";
-import { environments, type Environment } from "./environment";
+import { environments } from "./environment";
+import { GAME_CONFIG } from "./GameConfig";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
@@ -22,13 +23,11 @@ interface State {
   enemyUnits: number;
   enemyUnitBullets: number;
   fireInterval: number;
-}
-interface EnvProp {
-  mesh: THREE.Group;
-  y: number;
-  z: number;
-  side: "left" | "right";
-  nextRespawn: number;
+  level: number;
+  gameStartTime: number;
+  isPlaying: boolean;
+  lastEnemySpawn: number;
+  enemySpawnInterval: number;
 }
 let powerups: Powerup[] = [],
   powerupLabels: THREE.Sprite[] = [];
@@ -47,20 +46,25 @@ let state: State = {
   enemyUnits: 0,
   enemyUnitBullets: 0,
   fireInterval: FIRE_INTERVAL,
+  level: 1,
+  gameStartTime: Date.now(),
+  isPlaying: true,
+  lastEnemySpawn: 0,
+  enemySpawnInterval: 2000, // 2 seconds between spawns
 };
 
 // Game constants
-const PLAYER_Y = -8;
-const LANE_WIDTH = 3.6; // 20% wider than 3
-const GAP_PX = 10;
-const LANE_LEFT_X = -LANE_WIDTH / 2 - GAP_PX / 100;
-const LANE_RIGHT_X = LANE_WIDTH / 2 + GAP_PX / 100;
+// const GAP_PX = 10;
+const PLAYER_Y = GAME_CONFIG.playerY;
+const LANE_WIDTH = GAME_CONFIG.laneWidth;
+const LANE_LEFT_X = GAME_CONFIG.laneLeftX;
+const LANE_RIGHT_X = GAME_CONFIG.laneRightX;
 const SCENE_MARGIN = LANE_WIDTH / 2; // half a lane width
 const SCENE_LEFT = LANE_LEFT_X - SCENE_MARGIN;
 const SCENE_RIGHT = LANE_RIGHT_X + SCENE_MARGIN;
 export const PLAYER_COLOR = 0x0077ff;
-const ENEMY_LANE_COLOR = 0xff5555;
-const POWERUP_LANE_COLOR = 0x55ff55;
+// const ENEMY_LANE_COLOR = 0xff5555;
+// const POWERUP_LANE_COLOR = 0x55ff55;
 const PLAYER_MOVE_SPEED = 0.2;
 const ENEMY_SPEED = 0.02;
 const POWERUP_SPEED = 0.02;
@@ -74,8 +78,8 @@ let lastEnemySpawnTime = 0;
 let lastPowerupSpawnTime = 0;
 const ENEMY_SPAWN_INTERVAL = 5000; // 5 seconds between enemy spawns
 const POWERUP_SPAWN_INTERVAL = 8000; // 8 seconds between powerup spawns
-const ENEMY_SPAWN_Y = 12; // Spawn enemies 12 units above player
-const POWERUP_SPAWN_Y = 12; // Spawn powerups 12 units above player
+const ENEMY_SPAWN_Y = GAME_CONFIG.enemySpawnY; // Spawn enemies 12 units above player
+const POWERUP_SPAWN_Y = GAME_CONFIG.enemySpawnY; // Spawn powerups 12 units above player
 const REQUIRED_WAVES = 10; // Number of enemy waves needed for victory
 const TRAVEL_TIME = 11000; // Seconds for enemies/powerups to reach player
 let wavesSpawned = 0; // Counter for number of enemy waves spawned
@@ -83,8 +87,16 @@ let wavesSpawned = 0; // Counter for number of enemy waves spawned
 // Replace enemyGroups and related variables with a flat enemies array
 let enemies: THREE.Mesh[] = [];
 
-const PERSPECTIVE_START_Z = 0;
-const PERSPECTIVE_END_Z = 3; // More subtle effect (was 7)
+const PERSPECTIVE_START_Z = GAME_CONFIG.perspectiveStartZ;
+const PERSPECTIVE_END_Z = GAME_CONFIG.perspectiveEndZ; // More subtle effect (was 7)
+
+// Add at the top with other constants
+const DIFFICULTY_TIERS = [
+  { time: 0, minBulletsPerSecond: 0.5 }, // Starting difficulty
+  { time: 20, minBulletsPerSecond: 1.0 }, // 20 seconds
+  { time: 40, minBulletsPerSecond: 3.0 }, // 40 seconds
+  { time: 60, minBulletsPerSecond: 5.0 }, // 60 seconds
+];
 
 function createTextSprite(
   message: string,
@@ -185,7 +197,13 @@ function calculateEnemyGroupSize(): number {
   const bulletsPerSecond = calculatePlayerBulletsPerSecond();
   // Calculate how many bullets the player can fire during the travel time
   // const totalBullets = bulletsPerSecond * (TRAVEL_TIME / 1000);
-  const totalBullets = bulletsPerSecond * (ENEMY_SPAWN_INTERVAL / 1000);
+  const requiredBulletsPerSecond = getRequiredDifficulty();
+  const effectiveBulletsPerSecond = Math.max(
+    bulletsPerSecond,
+    requiredBulletsPerSecond,
+  );
+  const totalBullets =
+    effectiveBulletsPerSecond * (ENEMY_SPAWN_INTERVAL / 1000);
 
   // Base size on total bullets, assuming each zombie takes 2-3 hits
   // const hitsPerZombie = 2 + Math.random(); // Random between 2 and 3
@@ -215,7 +233,26 @@ function calculatePowerupHitCount(): number {
   return result;
 }
 
-function spawnEnemies() {
+// Add new function to calculate required difficulty
+function getRequiredDifficulty(): number {
+  const currentTime = (Date.now() - state.gameStartTime) / 1000; // Convert to seconds
+  const currentTier = DIFFICULTY_TIERS.reduce((prev, curr) => {
+    return currentTime >= curr.time ? curr : prev;
+  });
+  return currentTier.minBulletsPerSecond;
+}
+
+// Modify the spawnEnemies function to use the required difficulty
+function spawnEnemies(): void {
+  if (!state.isPlaying) return;
+
+  const now = Date.now();
+  if (now - state.lastEnemySpawn < state.enemySpawnInterval) return;
+
+  // Calculate required difficulty based on time
+
+  // Calculate number of enemies based on player's current power level
+
   const enemyHealthBudget = calculateEnemyGroupSize();
   // Space zombies within the left lane only
   const laneCenter = LANE_LEFT_X;
@@ -254,7 +291,8 @@ function spawnEnemies() {
   );
 }
 
-function spawnPowerup() {
+// Add after the spawnEnemies function
+function spawnPowerup(): void {
   const hitCount = calculatePowerupHitCount();
   const isFireRate = Math.random() < 0.5;
   const color = isFireRate ? POWERUP_COLOR : POWERUP_ALT_COLOR;
@@ -307,6 +345,11 @@ export async function initGame(container: HTMLElement): Promise<void> {
     enemyUnits: 0,
     enemyUnitBullets: 0,
     fireInterval: FIRE_INTERVAL,
+    level: 1,
+    gameStartTime: Date.now(),
+    isPlaying: true,
+    lastEnemySpawn: 0,
+    enemySpawnInterval: 2000, // 2 seconds between spawns
   };
   gameOver = false;
   victory = false;
@@ -343,25 +386,25 @@ export async function initGame(container: HTMLElement): Promise<void> {
   container.appendChild(renderer.domElement);
 
   // Draw lanes (as transparent boxes for now)
-  const laneGeometry = new THREE.BoxGeometry(LANE_WIDTH, 20, 0.1);
-  const leftLaneMaterial = new THREE.MeshBasicMaterial({
-    color: ENEMY_LANE_COLOR,
-    transparent: true,
-    opacity: 0.1,
-  });
-  const rightLaneMaterial = new THREE.MeshBasicMaterial({
-    color: POWERUP_LANE_COLOR,
-    transparent: true,
-    opacity: 0.1,
-  });
+  // const laneGeometry = new THREE.BoxGeometry(LANE_WIDTH, 20, 0.1);
+  // const leftLaneMaterial = new THREE.MeshBasicMaterial({
+  //   color: ENEMY_LANE_COLOR,
+  //   transparent: true,
+  //   opacity: 0.1,
+  // });
+  // const rightLaneMaterial = new THREE.MeshBasicMaterial({
+  //   color: POWERUP_LANE_COLOR,
+  //   transparent: true,
+  //   opacity: 0.1,
+  // });
 
-  const leftLane = new THREE.Mesh(laneGeometry, leftLaneMaterial);
-  leftLane.position.x = LANE_LEFT_X;
-  scene.add(leftLane);
+  // const leftLane = new THREE.Mesh(laneGeometry, leftLaneMaterial);
+  // leftLane.position.x = LANE_LEFT_X;
+  // scene.add(leftLane);
 
-  const rightLane = new THREE.Mesh(laneGeometry, rightLaneMaterial);
-  rightLane.position.x = LANE_RIGHT_X;
-  scene.add(rightLane);
+  // const rightLane = new THREE.Mesh(laneGeometry, rightLaneMaterial);
+  // rightLane.position.x = LANE_RIGHT_X;
+  // scene.add(rightLane);
 
   // Initialize environment
   await currentEnvironment.implementation.initialize(scene);
