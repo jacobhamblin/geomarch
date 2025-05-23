@@ -78,6 +78,7 @@ export function createPlayerFormation(
   playerUnits: number,
   centerX: number,
   playerY: number,
+  playerZ: number = 0, // Default z position
 ): THREE.Group[] {
   const soldiers: THREE.Group[] = [];
   const spacing = 1.2; // Increased spacing for soldiers
@@ -85,7 +86,11 @@ export function createPlayerFormation(
 
   for (let i = 0; i < playerUnits; i++) {
     const soldier = createProceduralSoldier();
-    soldier.position.set(centerX + positions[i].x, playerY + positions[i].y, 0);
+    soldier.position.set(
+      centerX + positions[i].x,
+      playerY + positions[i].y,
+      playerZ,
+    );
     soldier.scale.set(0.45, 0.45, 0.45); // Scale up soldiers by 50%
     soldiers.push(soldier);
     scene.add(soldier);

@@ -15,7 +15,7 @@ function App() {
   }, [gameStarted]);
 
   // Max width: 600px, width: 100vw
-  const maxWidth = 600;
+  const maxWidth = 700;
 
   return (
     <>

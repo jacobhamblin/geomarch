@@ -4,18 +4,13 @@ import type { ZombieUserData } from "./zombie";
 import { createPlayerFormation, shootBulletFrom } from "./soldier";
 import { throttleLog } from "../utils";
 import { createProceduralZombie } from "./zombie";
+import { environments, type Environment } from "./environment";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
   camera: THREE.PerspectiveCamera,
   animationId: number;
 let playerMeshes: THREE.Group[] = [];
-interface EnemyGroup {
-  mesh: THREE.Mesh;
-  size: number;
-  y: number;
-  meshes: THREE.Mesh[];
-}
 interface Powerup {
   mesh: THREE.Mesh;
   hitCount: number;
@@ -28,11 +23,22 @@ interface State {
   enemyUnitBullets: number;
   fireInterval: number;
 }
-let enemyGroups: EnemyGroup[] = [],
-  enemyLabels: (THREE.Sprite | null)[] = [],
-  powerups: Powerup[] = [],
+interface EnvProp {
+  mesh: THREE.Group;
+  y: number;
+  z: number;
+  side: "left" | "right";
+  nextRespawn: number;
+}
+let powerups: Powerup[] = [],
   powerupLabels: THREE.Sprite[] = [];
-let bullets: { mesh: THREE.Mesh; lane: number }[] = [];
+let bullets: {
+  mesh: THREE.Mesh;
+  lane: number;
+  startY: number;
+  startZ: number;
+}[] = [];
+let currentEnvironment: (typeof environments)[0];
 let lastShotTime = 0;
 const BULLET_SPEED = 0.2;
 const FIRE_INTERVAL = 2000; // ms
@@ -76,6 +82,9 @@ let wavesSpawned = 0; // Counter for number of enemy waves spawned
 
 // Replace enemyGroups and related variables with a flat enemies array
 let enemies: THREE.Mesh[] = [];
+
+const PERSPECTIVE_START_Z = 0;
+const PERSPECTIVE_END_Z = 3; // More subtle effect (was 7)
 
 function createTextSprite(
   message: string,
@@ -131,18 +140,14 @@ function showOverlay(message: string) {
   }
 
   // Clear all game objects
-  enemyGroups = [];
-  enemyLabels = [];
   powerups = [];
   powerupLabels = [];
   bullets = [];
   playerMeshes = [];
 
   overlay.innerHTML = `<div>${message}</div><button style='font-size:2rem;margin-top:2rem' onclick='document.getElementById("game-overlay").remove(); window.location.reload();'>Return to Menu</button>`;
-}
 
-function updatePlayerUnitsDisplay() {
-  // No longer needed, so do nothing
+  currentEnvironment.implementation.cleanup();
 }
 
 function updatePlayerMeshes(centerX = 0) {
@@ -155,12 +160,19 @@ function updatePlayerMeshes(centerX = 0) {
     state.playerUnits,
     centerX,
     PLAYER_Y,
+    PERSPECTIVE_END_Z, // Set player z position to match elevated perspective
   );
 }
 
 function createBullet(x: number, y: number) {
   const bullet = shootBulletFrom(scene, x, y, PLAYER_COLOR);
-  bullets.push({ mesh: bullet, lane: x < 0 ? -1 : 1 });
+  bullet.position.z = PERSPECTIVE_END_Z; // Start bullet at player's z position
+  bullets.push({
+    mesh: bullet,
+    lane: x < 0 ? -1 : 1,
+    startY: y,
+    startZ: PERSPECTIVE_END_Z,
+  });
 }
 
 function calculatePlayerBulletsPerSecond(): number {
@@ -201,24 +213,6 @@ function calculatePowerupHitCount(): number {
   const result = Math.min(15, Math.max(2, hitCount));
   throttleLog("calculatePowerupHitCount", result);
   return result;
-}
-
-function generateZombieHealths(budget: number): number[] {
-  const healths = [];
-  let remaining = budget;
-  while (remaining > 0) {
-    if (remaining >= 5 && Math.random() < 0.15) {
-      healths.push(5);
-      remaining -= 5;
-    } else if (remaining >= 3 && Math.random() < 0.2) {
-      healths.push(3);
-      remaining -= 3;
-    } else {
-      healths.push(1);
-      remaining -= 1;
-    }
-  }
-  return healths;
 }
 
 function spawnEnemies() {
@@ -286,7 +280,7 @@ function spawnPowerup() {
   powerupLabels.push(label);
 }
 
-export function initGame(container: HTMLElement): void {
+export async function initGame(container: HTMLElement): Promise<void> {
   // Remove any existing game overlay
   const existingOverlay = document.getElementById("game-overlay");
   if (existingOverlay) {
@@ -303,8 +297,6 @@ export function initGame(container: HTMLElement): void {
   }
 
   // Reset all game state
-  enemyGroups = [];
-  enemyLabels = [];
   powerups = [];
   powerupLabels = [];
   bullets = [];
@@ -322,7 +314,10 @@ export function initGame(container: HTMLElement): void {
   lastEnemySpawnTime = 0;
   lastPowerupSpawnTime = 0;
   wavesSpawned = 0; // Reset wave counter
-  updatePlayerUnitsDisplay();
+
+  // Select random environment
+  currentEnvironment =
+    environments[Math.floor(Math.random() * environments.length)];
 
   // Scene setup
   scene = new THREE.Scene();
@@ -367,6 +362,9 @@ export function initGame(container: HTMLElement): void {
   const rightLane = new THREE.Mesh(laneGeometry, rightLaneMaterial);
   rightLane.position.x = LANE_RIGHT_X;
   scene.add(rightLane);
+
+  // Initialize environment
+  await currentEnvironment.implementation.initialize(scene);
 
   // Player unit (simple box)
   updatePlayerMeshes();
@@ -459,7 +457,18 @@ export function initGame(container: HTMLElement): void {
       } else if (zombieData.isFat) {
         speedMultiplier = 0.8; // 20% slower
       }
+      // Move down
       zombie.position.y -= ENEMY_SPEED * speedMultiplier * delta * 60;
+      // Perspective effect: move closer to camera as they move down
+      // At ENEMY_SPAWN_Y, z=PERSPECTIVE_START_Z; at PLAYER_Y, z=PERSPECTIVE_END_Z
+      const startY = ENEMY_SPAWN_Y;
+      const endY = PLAYER_Y;
+      const t = Math.max(
+        0,
+        Math.min(1, (startY - zombie.position.y) / (startY - endY)),
+      );
+      zombie.position.z =
+        PERSPECTIVE_START_Z + (PERSPECTIVE_END_Z - PERSPECTIVE_START_Z) * t;
 
       // Check if any zombie in the group has reached the player
       let anyZombieReached = false;
@@ -470,7 +479,6 @@ export function initGame(container: HTMLElement): void {
       if (anyZombieReached) {
         // Use actual number of remaining zombies for damage
         state.playerUnits -= 1;
-        updatePlayerUnitsDisplay();
         // Remove the zombie
         scene.remove(zombie);
         enemies.splice(i, 1);
@@ -491,7 +499,17 @@ export function initGame(container: HTMLElement): void {
       p.mesh.position.y -= POWERUP_SPEED * delta * 60;
       p.y = p.mesh.position.y;
       powerupLabels[i].position.y = p.mesh.position.y + 1;
-      powerupLabels[i].position.z = 2;
+      // Perspective effect: move closer to camera as they move down
+      // At POWERUP_SPAWN_Y, z=PERSPECTIVE_START_Z; at PLAYER_Y, z=PERSPECTIVE_END_Z
+      const startY = POWERUP_SPAWN_Y;
+      const endY = PLAYER_Y;
+      const t = Math.max(
+        0,
+        Math.min(1, (startY - p.mesh.position.y) / (startY - endY)),
+      );
+      p.mesh.position.z =
+        PERSPECTIVE_START_Z + (PERSPECTIVE_END_Z - PERSPECTIVE_START_Z) * t;
+      powerupLabels[i].position.z = p.mesh.position.z + 2;
       if (p.mesh.position.y < PLAYER_Y - 2) {
         scene.remove(p.mesh);
         scene.remove(powerupLabels[i]);
@@ -505,6 +523,13 @@ export function initGame(container: HTMLElement): void {
 
       // Move bullet upward
       bullet.mesh.position.y += BULLET_SPEED * delta * 60;
+      // Interpolate z position based on y position
+      // As bullet moves from startY up, z goes from startZ to PERSPECTIVE_START_Z
+      const totalYTravel = 30 - bullet.startY; // 30 is the y at which bullet is removed
+      const currentYTravel = bullet.mesh.position.y - bullet.startY;
+      const t = Math.max(0, Math.min(1, currentYTravel / totalYTravel));
+      bullet.mesh.position.z =
+        bullet.startZ + (PERSPECTIVE_START_Z - bullet.startZ) * t;
       if (bullet.mesh.position.y > 30) {
         scene.remove(bullet.mesh);
         bullets.splice(i, 1);
@@ -581,7 +606,6 @@ export function initGame(container: HTMLElement): void {
                 state.fireInterval = Math.max(200, state.fireInterval / 2);
               } else if (p.type === "units") {
                 state.playerUnits++;
-                updatePlayerUnitsDisplay();
                 updatePlayerMeshes(targetX);
               }
               powerups.splice(j, 1);
@@ -606,6 +630,10 @@ export function initGame(container: HTMLElement): void {
       showOverlay("Victory!");
       return;
     }
+
+    // Update environment
+    currentEnvironment.implementation.update(delta, now);
+
     if (renderer) {
       renderer.render(scene, camera);
     }
