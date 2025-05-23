@@ -73,7 +73,7 @@ export function createProceduralZombie(): THREE.Group {
   // === Size variation ===
   let scale = 1.0;
   if (isFat) {
-    scale = 1.3; // Fat zombies are 30% larger
+    scale = 1.45; // Fat zombies are 45% larger (was 1.3)
   } else if (isBaby) {
     scale = 0.6; // Baby zombies are 60% size
   } else if (isCrawling) {

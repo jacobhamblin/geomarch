@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import { createEnemyGroup } from "./enemy";
+// import { createEnemyGroup } from "./enemy";
 import type { ZombieUserData } from "./zombie";
 import { createPlayerFormation, shootBulletFrom } from "./soldier";
 import { throttleLog } from "../utils";
+import { createProceduralZombie } from "./zombie";
 
 let renderer: THREE.WebGLRenderer | undefined,
   scene: THREE.Scene,
@@ -72,6 +73,9 @@ const POWERUP_SPAWN_Y = 12; // Spawn powerups 12 units above player
 const REQUIRED_WAVES = 10; // Number of enemy waves needed for victory
 const TRAVEL_TIME = 11000; // Seconds for enemies/powerups to reach player
 let wavesSpawned = 0; // Counter for number of enemy waves spawned
+
+// Replace enemyGroups and related variables with a flat enemies array
+let enemies: THREE.Mesh[] = [];
 
 function createTextSprite(
   message: string,
@@ -199,27 +203,57 @@ function calculatePowerupHitCount(): number {
   return result;
 }
 
-function spawnEnemyGroup() {
-  const enemySize = calculateEnemyGroupSize();
-  state.enemyUnitBullets += enemySize;
-  const enemyMeshes = createEnemyGroup(
-    scene,
-    LANE_LEFT_X,
-    ENEMY_SPAWN_Y,
-    enemySize,
-  );
-  state.enemyUnits += enemyMeshes.length;
-  enemyGroups.push({
-    mesh: enemyMeshes[0],
-    size: enemySize,
-    y: ENEMY_SPAWN_Y,
-    meshes: enemyMeshes,
-  });
-  enemyLabels.push(null);
-  wavesSpawned++; // Increment wave counter
+function generateZombieHealths(budget: number): number[] {
+  const healths = [];
+  let remaining = budget;
+  while (remaining > 0) {
+    if (remaining >= 5 && Math.random() < 0.15) {
+      healths.push(5);
+      remaining -= 5;
+    } else if (remaining >= 3 && Math.random() < 0.2) {
+      healths.push(3);
+      remaining -= 3;
+    } else {
+      healths.push(1);
+      remaining -= 1;
+    }
+  }
+  return healths;
+}
+
+function spawnEnemies() {
+  const enemyHealthBudget = calculateEnemyGroupSize();
+  // Space zombies within the left lane only
+  const laneCenter = LANE_LEFT_X;
+  const laneWidth = LANE_WIDTH * 0.8; // Use 80% of lane width for spacing
+  // Calculate how many zombies we can spawn based on the budget
+  // We'll assume an average health of 2 per zombie to determine count
+  const count = Math.max(1, Math.floor(enemyHealthBudget / 2));
+  // Vertical spread: spread zombies over a range depending on count
+  const verticalSpread = Math.max(2, Math.min(4, count * 0.5)); // 2 to 4 units
+  for (let i = 0; i < count; i++) {
+    const zombie = createProceduralZombie();
+    const zombieData = zombie.userData as ZombieUserData;
+    // Random x position within the entire lane width
+    const x = laneCenter - laneWidth / 2 + Math.random() * laneWidth;
+    // Evenly space zombies vertically (y)
+    const y =
+      count === 1
+        ? ENEMY_SPAWN_Y
+        : ENEMY_SPAWN_Y +
+          verticalSpread / 2 -
+          (verticalSpread * i) / (count - 1);
+    zombie.position.set(x, y, 0);
+    zombie.scale.set(0.4, 0.4, 0.4);
+    scene.add(zombie as unknown as THREE.Mesh);
+    enemies.push(zombie as unknown as THREE.Mesh);
+    state.enemyUnitBullets += zombieData.health;
+    state.enemyUnits += 1;
+  }
+  wavesSpawned++;
   throttleLog(
-    "spawnEnemyGroup",
-    enemySize,
+    "spawnEnemies",
+    count,
     state.enemyUnitBullets,
     state.enemyUnits,
     state.playerUnits,
@@ -338,7 +372,7 @@ export function initGame(container: HTMLElement): void {
   updatePlayerMeshes();
 
   // Spawn initial wave of enemies
-  spawnEnemyGroup();
+  spawnEnemies();
   lastEnemySpawnTime = performance.now();
 
   // Mouse/touch controls for player movement
@@ -378,7 +412,7 @@ export function initGame(container: HTMLElement): void {
 
     // Spawn new enemies and powerups based on timing
     if (now - lastEnemySpawnTime > ENEMY_SPAWN_INTERVAL) {
-      spawnEnemyGroup();
+      spawnEnemies();
       lastEnemySpawnTime = now;
     }
     if (now - lastPowerupSpawnTime > POWERUP_SPAWN_INTERVAL) {
@@ -387,12 +421,10 @@ export function initGame(container: HTMLElement): void {
     }
 
     // Animate zombies
-    for (const group of enemyGroups) {
-      for (const mesh of group.meshes) {
-        const zombieData = mesh.userData as ZombieUserData;
-        if (zombieData.animate) {
-          zombieData.animate(now / 1000);
-        }
+    for (const zombie of enemies) {
+      const zombieData = zombie.userData as ZombieUserData;
+      if (zombieData.animate) {
+        zombieData.animate(now / 1000);
       }
     }
 
@@ -417,43 +449,40 @@ export function initGame(container: HTMLElement): void {
       }
     }
     // Move enemies down
-    for (let i = enemyGroups.length - 1; i >= 0; i--) {
-      const group = enemyGroups[i];
-      // Move all meshes in the group
-      for (const mesh of group.meshes) {
-        mesh.position.y -= ENEMY_SPEED * delta * 60;
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const zombie = enemies[i];
+      const zombieData = zombie.userData as ZombieUserData;
+      // Adjust speed based on zombie type
+      let speedMultiplier = 1.0;
+      if (zombieData.isCrawling) {
+        speedMultiplier = 1.2; // 20% faster
+      } else if (zombieData.isFat) {
+        speedMultiplier = 0.8; // 20% slower
       }
-      group.y = group.mesh.position.y;
+      zombie.position.y -= ENEMY_SPEED * speedMultiplier * delta * 60;
 
       // Check if any zombie in the group has reached the player
       let anyZombieReached = false;
-      for (const mesh of group.meshes) {
-        if (mesh.position.y <= PLAYER_Y + 0.5) {
-          anyZombieReached = true;
-          break;
-        }
+      if (zombie.position.y <= PLAYER_Y + 0.5) {
+        anyZombieReached = true;
       }
 
       if (anyZombieReached) {
         // Use actual number of remaining zombies for damage
-        state.playerUnits -= group.meshes.length;
+        state.playerUnits -= 1;
         updatePlayerUnitsDisplay();
-        // Remove all meshes in the group
-        for (const mesh of group.meshes) scene.remove(mesh);
-        enemyGroups.splice(i, 1);
-        enemyLabels.splice(i, 1);
-        // Update player formation to remove lost units
-        updatePlayerMeshes(targetX);
+        // Remove the zombie
+        scene.remove(zombie);
+        enemies.splice(i, 1);
         if (state.playerUnits <= 0) {
           gameOver = true;
           showOverlay("Game Over!");
           return;
         }
-      } else if (group.mesh.position.y < PLAYER_Y - 2) {
+      } else if (zombie.position.y < PLAYER_Y - 2) {
         // Remove any zombies that go past the player
-        for (const mesh of group.meshes) scene.remove(mesh);
-        enemyGroups.splice(i, 1);
-        enemyLabels.splice(i, 1);
+        scene.remove(zombie);
+        enemies.splice(i, 1);
       }
     }
     // Move powerups down
@@ -486,48 +515,37 @@ export function initGame(container: HTMLElement): void {
       const bulletLane = bullet.mesh.position.x < 0 ? -1 : 1;
 
       // Check for collisions with enemies in the same lane
-      for (let j = enemyGroups.length - 1; j >= 0; j--) {
-        const group = enemyGroups[j];
-        const enemyLane = group.mesh.position.x < 0 ? -1 : 1;
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const zombie = enemies[j];
+        const enemyLane = zombie.position.x < 0 ? -1 : 1;
 
         if (bulletLane === enemyLane) {
           // Check each zombie in the group for collision
-          for (let k = 0; k < group.meshes.length; k++) {
-            const zombie = group.meshes[k];
-            const zombieData = zombie.userData as ZombieUserData;
-            // Adjust collision range based on zombie type
-            const collisionRange = zombieData.isFat ? 2.5 : 1.5; // Fat zombies have larger collision range
+          const zombieData = zombie.userData as ZombieUserData;
+          // Adjust collision range based on zombie type
+          const collisionRange = zombieData.isFat ? 2.5 : 1.5; // Fat zombies have larger collision range
 
-            if (
-              Math.abs(bullet.mesh.position.y - zombie.position.y) <
-              collisionRange
-            ) {
-              // Reduce health of this zombie
-              zombieData.health -= 1;
+          if (
+            Math.abs(bullet.mesh.position.y - zombie.position.y) <
+            collisionRange
+          ) {
+            // Reduce health of this zombie
+            zombieData.health -= 1;
 
-              // Remove bullet
-              scene.remove(bullet.mesh);
-              bullets.splice(i, 1);
-              state.enemyUnitBullets -= 1;
+            // Remove bullet
+            scene.remove(bullet.mesh);
+            bullets.splice(i, 1);
+            state.enemyUnitBullets -= 1;
 
-              // Remove the zombie if its health reaches 0
-              if (zombieData.health <= 0) {
-                scene.remove(zombie);
-                group.meshes = group.meshes.filter((mesh) => mesh !== zombie);
-                group.size = group.meshes.length; // Update group size to match remaining meshes
-                state.enemyUnits -= 1;
-
-                // Remove the group if all zombies are gone
-                if (group.meshes.length === 0) {
-                  enemyGroups.splice(j, 1);
-                  enemyLabels.splice(j, 1);
-                }
-              }
-
-              break; // Bullet can only hit one zombie
+            // Remove the zombie if its health reaches 0
+            if (zombieData.health <= 0) {
+              scene.remove(zombie);
+              enemies.splice(j, 1);
+              state.enemyUnits -= 1;
             }
+
+            break; // Bullet can only hit one zombie
           }
-          if (i >= bullets.length) break; // Exit if bullet was removed
         }
       }
 
@@ -583,11 +601,7 @@ export function initGame(container: HTMLElement): void {
       lastShotTime = now;
     }
     // Victory check
-    if (
-      !victory &&
-      enemyGroups.length === 0 &&
-      wavesSpawned >= REQUIRED_WAVES
-    ) {
+    if (!victory && enemies.length === 0 && wavesSpawned >= REQUIRED_WAVES) {
       victory = true;
       showOverlay("Victory!");
       return;
