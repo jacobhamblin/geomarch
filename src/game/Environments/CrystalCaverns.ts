@@ -124,7 +124,7 @@ export class CrystalCavernsEnvironment implements EnvironmentImpl {
     for (let i = 1; i <= this.numObjects; i++) {
       try {
         const obj = await loader.loadAsync(
-          `src/assets/CrystalCaverns/${i}.obj`,
+          `${import.meta.env.BASE_URL}CrystalCaverns/${i}.obj`,
         );
         console.log(`Loaded prop ${i}:`, obj);
 
